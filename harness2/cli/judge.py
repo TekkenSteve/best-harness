@@ -106,8 +106,15 @@ def collect_selections(ns_dir: Path, modes: tuple[str, ...]) -> list[dict]:
 
 
 def judge_bases(adapter, ns_dir: Path) -> int:
-    """Score every reference execution recorded in this namespace's task summaries."""
-    rows, legacy = [], 0
+    """Score every reference execution recorded in this namespace's task summaries.
+
+    Rows use the SAME Scored shape as judged.json (task_id/mode/k/label/frac/graded),
+    so one reader — the report, the viewer, or a notebook — consumes both files
+    unchanged. mode is "agg": reference executions are shared across modes, and the
+    parallel comparison is the canonical base side of the report.
+    """
+    rows: list[J.Scored] = []
+    legacy = 0
     for summary_path in sorted(ns_dir.glob("*/summary.json")):
         try:
             summary = json.loads(summary_path.read_text())
@@ -115,6 +122,7 @@ def judge_bases(adapter, ns_dir: Path) -> int:
             print(f"  ! skipping unreadable {summary_path}: {exc}", flush=True)
             continue
         task_id = summary.get("task_id", "")
+        k = int(summary.get("k") or 0)
         for entry in summary.get("base") or []:
             if not isinstance(entry, dict) or not entry.get("run_dir"):
                 legacy += 1
@@ -129,7 +137,19 @@ def judge_bases(adapter, ns_dir: Path) -> int:
                 shown = "-" if got is None else f"{got.get('n_passed')}/{got.get('n_criteria')}"
                 print(f"  {task_id[:52]:<52} {label} {shown}", flush=True)
             rows.append(
-                {"task": task_id, "label": label, "run_id": entry.get("run_id", ""), "score": got}
+                J.Scored(
+                    task_id=task_id,
+                    mode="agg",
+                    k=k,
+                    label=label,
+                    run_id=entry.get("run_id", ""),
+                    chosen_is_base=True,
+                    n_passed=(got or {}).get("n_passed"),
+                    n_criteria=(got or {}).get("n_criteria"),
+                    all_pass=bool((got or {}).get("all_pass")),
+                    raw=dict(got or {}),
+                    error="" if got else "judge returned nothing",
+                )
             )
     if legacy:
         print(
@@ -141,8 +161,11 @@ def judge_bases(adapter, ns_dir: Path) -> int:
         print(f"no reference executions recorded under {ns_dir}; wrote nothing", flush=True)
         return 2
     out = ns_dir / "base_judged.json"
-    out.write_text(json.dumps(rows, indent=1, default=str), encoding="utf-8")
-    graded = sum(1 for r in rows if r["score"] is not None)
+    out.write_text(
+        json.dumps([r.__dict__ | {"frac": r.frac, "graded": r.graded} for r in rows], indent=1),
+        encoding="utf-8",
+    )
+    graded = sum(1 for r in rows if r.graded)
     print(f"wrote {out}: {len(rows)} row(s), {graded} graded")
     return 0 if graded == len(rows) else 2
 

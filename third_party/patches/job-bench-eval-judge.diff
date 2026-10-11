@@ -1,5 +1,5 @@
 diff --git a/eval/judge.py b/eval/judge.py
-index 8412969..1c83bb5 100755
+index 8412969..93682ec 100755
 --- a/eval/judge.py
 +++ b/eval/judge.py
 @@ -531,6 +531,15 @@ IMPORTANT:
@@ -18,16 +18,19 @@ index 8412969..1c83bb5 100755
      for attempt in range(max_retries):
          try:
              client = get_openai_client(api_base, api_key)
-@@ -543,11 +552,20 @@ IMPORTANT:
+@@ -543,11 +552,22 @@ IMPORTANT:
                      },
                      {"role": "user", "content": user_content},
                  ],
 -                max_completion_tokens=8192,
+-                temperature=0.0,
 +                # 64k so extended-thinking effort doesn't consume the whole budget and starve the
 +                # verdict output (thinking + verdict share this cap; 32k was too small at effort=high,
 +                # which silently zeroed rubrics on hard tasks).
 +                max_completion_tokens=int(os.environ.get("JUDGE_MAX_COMPLETION_TOKENS", "65536")),
-                 temperature=0.0,
++                # Some backends only accept a fixed temperature (kimi k3: 1); make it
++                # an env knob instead of a hard 0.0 that those endpoints reject with 400.
++                temperature=float(os.environ.get("JUDGE_TEMPERATURE", "0.0")),
                  timeout=timeout_sec,
 +                **extra_kwargs,
              )
