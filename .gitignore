@@ -34,3 +34,5 @@ dependencies/*
 .uv-python/
 .hf-home/
 .xdg-config/
+.xdg-cache/
+.bun-cache/
