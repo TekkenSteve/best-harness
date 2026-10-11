@@ -18,7 +18,8 @@ No scripts, no external assets: collapsibles are native ``<details>`` elements a
 charts are hand-drawn SVG with explicit width/height attributes (a bare
 ``width="100%"`` SVG collapses to zero height in browsers), so the file works
 offline from the file system and can be archived next to the runs directory it
-describes.
+describes. UI text is bilingual (``--lang zh`` default, ``--lang en``); data
+content is always shown verbatim.
 """
 
 from __future__ import annotations
@@ -69,14 +70,13 @@ h4 { font-size: .82rem; margin: .9rem 0 .35rem; text-transform: uppercase;
 .chip { background: var(--card); border: 1px solid var(--border);
         border-radius: 10px; padding: .5rem .9rem; min-width: 8.5rem; }
 .chip .v { font-size: 1.25rem; font-weight: 650; letter-spacing: -0.01em; }
-.chip .l { font-size: .72rem; color: var(--muted); text-transform: uppercase;
-           letter-spacing: .05em; margin-top: .1rem; }
+.chip .l { font-size: .72rem; color: var(--muted); margin-top: .15rem; }
 table { border-collapse: separate; border-spacing: 0; width: 100%;
         margin: .6rem 0 1rem; font-size: .92rem; }
 th, td { padding: .5rem .7rem; text-align: left; vertical-align: top;
          border-bottom: 1px solid var(--border); }
-th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
-     color: var(--muted); border-bottom: 1.5px solid var(--border); }
+th { font-size: .72rem; letter-spacing: .05em; color: var(--muted);
+     border-bottom: 1.5px solid var(--border); }
 tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 code, pre { font: 12.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
@@ -104,6 +104,10 @@ details > .body { padding: 0 1rem 1rem; border-top: 1px solid var(--border); }
 details > .body > :first-child { margin-top: .8rem; }
 details.roll { margin-left: .8rem; border-radius: 8px; }
 details.roll > summary { padding: .45rem .8rem; font-size: .9rem; }
+details.guide { border-left: 3px solid var(--accent); }
+details.guide > summary { font-weight: 600; }
+details.guide .body p, details.guide .body li { margin: .35rem 0; }
+details.guide .body ul { padding-left: 1.2rem; margin: .3rem 0 .6rem; }
 .tg { font-weight: 700; }
 .tg-action { color: var(--tg-action); } .tg-obs { color: var(--tg-obs); }
 .tg-err { color: var(--tg-err); } .tg-assist { color: var(--tg-assist); }
@@ -115,6 +119,154 @@ figcaption, .chart-note { font-size: .78rem; color: var(--muted); margin: .1rem 
 footer { margin-top: 3rem; font-size: .78rem; color: var(--muted);
          border-top: 1px solid var(--border); padding-top: .8rem; }
 """
+
+# ----------------------------------------------------------------------------- i18n
+
+LANGS = ("zh", "en")
+
+_T = {
+    "zh": {
+        "page_title": "Harness² 运行报告",
+        "header_meta": "数据目录：{root} · 生成于 {stamp}",
+        "chip_tasks": "任务数",
+        "chip_namespaces": "实验组",
+        "chip_adopted": "采纳了优化配置",
+        "chip_kept_base": "保留了基线",
+        "chip_base": "基线平均分",
+        "chip_refined": "优化后平均分",
+        "chip_gain": "平均提升",
+        "ns_header": "{ns} · {n} 个任务",
+        "gain_title": "各领域平均提升 · 并行模式",
+        "domain_mode": "领域：{domain} · 模式：{mode}",
+        "col_task": "任务",
+        "col_status": "状态",
+        "col_pick": "盲选采纳 · 得分对比基线",
+        "gains_line": "{mode}：优化后 <b>{mean}</b> vs 基线 {mean_b}（{n} 个已评分任务的均值）—— Δ {delta} 个百分点",
+        "chart_caption": "每对柱子是一次任务：灰 = 基线配置，绿/红 = 优化后配置（绿涨红跌）；柱下数字是分差（百分点）",
+        "word_base": "基线",
+        "word_candidate": "候选",
+        "word_final": "最终",
+        "badge_fallback": "回退",
+        "badge_fell_back": "回退",
+        "badge_kept_base": "保留基线",
+        "task_meta": "实验组 {ns} · 领域 {domain} · 每任务尝试 k={k}",
+        "blind_title": "盲选 · {mode}",
+        "blind_line": "采纳了 {label} —— 理由：{why}",
+        "no_reason": "未记录理由",
+        "h_notes": "改进器的提案说明",
+        "h_diff": "配置改动（harness diff）",
+        "h_deliverable": "交付物",
+        "h_trajectory": "执行轨迹（{name}）",
+        "h_experience": "沉淀的经验",
+        "h_rollouts": "执行记录 · {n}",
+        "no_evidence": "未找到这次执行的证据文件。",
+        "empty": "该目录下没有找到 summary.json。",
+        "footer": "只读视图 · 共 {n} 条任务记录 · 单文件 HTML，无脚本、无外部资源",
+        "guide_title": "📖 怎么看这份报告",
+    },
+    "en": {
+        "page_title": "Harness² runs report",
+        "header_meta": "{root} · generated {stamp}",
+        "chip_tasks": "tasks",
+        "chip_namespaces": "namespaces",
+        "chip_adopted": "refined adopted",
+        "chip_kept_base": "base kept",
+        "chip_base": "mean base score",
+        "chip_refined": "mean refined score",
+        "chip_gain": "mean gain",
+        "ns_header": "{ns} · {n} task(s)",
+        "gain_title": "mean gain per domain · parallel mode",
+        "domain_mode": "domain: {domain} · mode: {mode}",
+        "col_task": "task",
+        "col_status": "status",
+        "col_pick": "blind pick · score vs base",
+        "gains_line": "{mode}: refined <b>{mean}</b> vs base {mean_b}, mean over {n} judged task(s) — Δ {delta} pts",
+        "chart_caption": "each pair of bars is one task: grey = base harness, green/red = refined; the number below is the delta in points",
+        "word_base": "base",
+        "word_candidate": "candidate",
+        "word_final": "final",
+        "badge_fallback": "fallback",
+        "badge_fell_back": "fell back",
+        "badge_kept_base": "kept base",
+        "task_meta": "namespace {ns} · domain {domain} · k={k} attempts per task",
+        "blind_title": "Blind selection · {mode}",
+        "blind_line": "chose {label} — {why}",
+        "no_reason": "no reason recorded",
+        "h_notes": "Proposer notes",
+        "h_diff": "Harness diff",
+        "h_deliverable": "Deliverable",
+        "h_trajectory": "Trajectory ({name})",
+        "h_experience": "Experience",
+        "h_rollouts": "Rollouts · {n}",
+        "no_evidence": "No evidence files found for this rollout.",
+        "empty": "No summary.json found under this runs root.",
+        "footer": "read-only view of {n} task record(s) · self-contained HTML, no scripts, no external assets",
+        "guide_title": "📖 How to read this report",
+    },
+}
+
+_GUIDE = {
+    "zh": """
+<p>Harness² 对<b>同一个任务</b>做多轮对照实验，被优化的对象叫 <b>harness</b>——模型周围的一整套
+可编辑配置（系统提示词、守卫规则、长期记忆、工具指引、技能、脚本等），模型本身不动。</p>
+<p>流程：先用<b>基线配置</b>（base，未改动的原始配置）执行一遍；再由「改进器」提出两类<b>候选配置</b>
+——<code>inv</code> 是通用改进，<code>dom</code> 是面向当前领域的定制改进——分别试跑；
+然后组合出<b>最终配置</b>（<code>agg</code>）；最后由<b>盲选</b>挑出要采纳的交付物
+——评审时看不到每份交付物来自哪个配置，避免偏向。</p>
+<ul>
+<li><b>徽章</b>：<span class="badge b-base">基线</span> 原始配置的执行；
+<span class="badge b-cand">候选</span> 试跑的中间方案；
+<span class="badge b-final">最终</span> 组合后被采纳的方案；
+<span class="badge b-warn">回退</span> 没有可用候选、只能保留基线。</li>
+<li><b>得分</b>：由独立的 LLM 评审按任务的评分细则（rubric）逐条打分。
+灰柱 = 基线，绿柱 = 提升，红柱 = 下降，柱下 Δ 是分差（百分点）。</li>
+<li><b>执行轨迹</b>：一次执行的完整过程。彩色标签：
+<span class="tg tg-action">[ACTION]</span> 工具调用、
+<span class="tg tg-obs">[OBSERVATION]</span> 工具返回、
+<span class="tg tg-assist">[ASSISTANT]</span> 模型回复、
+<span class="tg tg-err">[ERROR]</span> 出错。</li>
+<li><b>沉淀的经验</b>：跑完该任务后总结的可复用教训，会带入同领域的后续任务——
+这是 harness²「跨任务学习」的那一层。</li>
+<li><b>模式</b>：并行（agg）= 多个候选同时试跑后组合；顺序（seq）= 一步步连续改进。</li>
+</ul>
+""",
+    "en": """
+<p>Harness² runs a controlled experiment <b>per task</b>. The object being tuned is the
+<b>harness</b> — the editable configuration around the model (system prompt, guardrails,
+memory, tool guidance, skills, scripts); the model itself is never changed.</p>
+<p>Flow: the task runs once under the <b>base</b> harness; the improver then proposes two kinds of
+<b>candidates</b> — <code>inv</code> (general edits) and <code>dom</code> (domain-specific edits) —
+each probed on the same task; a composer merges them into the <b>final</b> harness
+(<code>agg</code>); finally a <b>blind selection</b> picks the deliverable to adopt, without
+seeing which harness produced it.</p>
+<ul>
+<li><b>Badges</b>: <span class="badge b-base">base</span> run with the original harness;
+<span class="badge b-cand">candidate</span> intermediate probe;
+<span class="badge b-final">final</span> adopted composition;
+<span class="badge b-warn">fallback</span> no usable candidate, base kept.</li>
+<li><b>Scores</b>: an independent LLM judge grades each task against its rubric, criterion by
+criterion. Grey bar = base, green = gain, red = regression; Δ below each pair is in points.</li>
+<li><b>Trajectory</b>: the full record of one execution. Colored tags:
+<span class="tg tg-action">[ACTION]</span> tool call,
+<span class="tg tg-obs">[OBSERVATION]</span> tool result,
+<span class="tg tg-assist">[ASSISTANT]</span> model reply,
+<span class="tg tg-err">[ERROR]</span> failure.</li>
+<li><b>Experience</b>: the lesson distilled after the task, carried into later tasks of the
+same domain — the cross-task learning layer.</li>
+<li><b>Modes</b>: parallel (agg) = probe several candidates, then compose; sequential (seq) =
+successive refinement steps.</li>
+</ul>
+""",
+}
+
+_MODE_LABEL = {
+    "zh": {"agg": "并行", "seq": "顺序"},
+    "en": {"agg": "parallel", "seq": "sequential"},
+}
+
+
+def _mode_label(mode: str, lang: str) -> str:
+    return _MODE_LABEL.get(lang, {}).get(mode, mode)
 
 
 def _e(value: object) -> str:
@@ -300,96 +452,111 @@ def _diff_html(text: str) -> str:
 
 # ----------------------------------------------------------------------------- sections
 
-_KIND_BADGE = {
-    "base": ("base", "b-base"),
-    "candidate": ("candidate", "b-cand"),
-    "final": ("final", "b-final"),
-}
+_KIND_BADGE = {"base": "b-base", "candidate": "b-cand", "final": "b-final"}
 
 
-def _kind_span(label: str, kind: str) -> str:
-    word, cls = _KIND_BADGE.get(kind, _KIND_BADGE["candidate"])
-    return f'<span class="badge {cls}">{_e(label)}</span> <span class="muted">{word}</span>'
+def _kind_span(label: str, kind: str, t8n: dict) -> str:
+    word = {
+        "base": t8n["word_base"],
+        "candidate": t8n["word_candidate"],
+        "final": t8n["word_final"],
+    }.get(kind, t8n["word_candidate"])
+    cls = _KIND_BADGE.get(kind, "b-cand")
+    return f'<span class="badge {cls}">{_e(label)}</span> <span class="muted">{_e(word)}</span>'
 
 
-def _mode_cell(task: TaskRecord, mode: str) -> str:
+def _mode_cell(task: TaskRecord, mode: str, t8n: dict) -> str:
     sel = task.selections.get(mode)
     if sel is None:
         return '<td class="muted">—</td>'
     chosen = sel["chosen_label"] or "?"
     kind = "base" if sel["chosen_is_base"] else "final"
-    flag = ' <span class="badge b-warn">fallback</span>' if sel["fallback"] else ""
+    flag = (
+        f' <span class="badge b-warn">{_e(t8n["badge_fallback"])}</span>'
+        if sel["fallback"]
+        else ""
+    )
     j, jb = task.judged.get(mode), task.judged_base.get(mode)
     return (
-        f"<td>{_kind_span(chosen, kind)}{flag}"
-        f"<br><span class='muted'>{_pct(j and j['frac'])} vs base {_pct(jb and jb['frac'])} "
+        f"<td>{_kind_span(chosen, kind, t8n)}{flag}"
+        f"<br><span class='muted'>{_pct(j and j['frac'])} vs {_pct(jb and jb['frac'])} "
         f"· {_delta(j and j['frac'], jb and jb['frac'])}</span></td>"
     )
 
 
-def _rollout_details(roll: Rollout) -> str:
+def _rollout_details(roll: Rollout, t8n: dict) -> str:
     flags = ""
     if roll.dim:
         flags += f' <span class="badge b-dim">{_e(roll.dim)}</span>'
     if roll.fell_back:
-        flags += ' <span class="badge b-warn">fell back</span>'
+        flags += f' <span class="badge b-warn">{_e(t8n["badge_fell_back"])}</span>'
     if roll.kept_base:
-        flags += ' <span class="badge b-warn">kept base</span>'
-    head = f"{_kind_span(roll.label, roll.kind)}{flags}"
+        flags += f' <span class="badge b-warn">{_e(t8n["badge_kept_base"])}</span>'
+    head = f"{_kind_span(roll.label, roll.kind, t8n)}{flags}"
     body = ""
     if roll.notes:
-        body += f"<h4>Proposer notes</h4><pre>{_e(roll.notes)}</pre>"
+        body += f"<h4>{_e(t8n['h_notes'])}</h4><pre>{_e(roll.notes)}</pre>"
     if roll.harness_diff:
-        body += f"<h4>Harness diff</h4><pre>{_diff_html(roll.harness_diff)}</pre>"
+        body += f"<h4>{_e(t8n['h_diff'])}</h4><pre>{_diff_html(roll.harness_diff)}</pre>"
     if roll.deliverable:
-        body += f"<h4>Deliverable</h4><pre>{_e(roll.deliverable)}</pre>"
+        body += f"<h4>{_e(t8n['h_deliverable'])}</h4><pre>{_e(roll.deliverable)}</pre>"
     if roll.trajectory:
         body += (
-            f"<h4>Trajectory ({_e(roll.trajectory_name)})</h4>"
+            f"<h4>{_e(t8n['h_trajectory'].format(name=roll.trajectory_name))}</h4>"
             f"<pre>{_traj_html(roll.trajectory)}</pre>"
         )
     if not body:
-        body = '<p class="muted">No evidence files found for this rollout.</p>'
+        body = f'<p class="muted">{_e(t8n["no_evidence"])}</p>'
     return (
         f'<details class="roll"><summary>{head}</summary>'
         f'<div class="body">{body}</div></details>'
     )
 
 
-def _task_section(task: TaskRecord) -> str:
-    status_cls = "b-final" if task.status == "ok" else "b-warn"
-    title = f'<span class="badge {status_cls}">{_e(task.status or "?")}</span> {_e(task.task_id)}'
+def _task_section(task: TaskRecord, lang: str, t8n: dict) -> str:
+    title = (
+        f'<span class="badge {"b-final" if task.status == "ok" else "b-warn"}">'
+        f"{_e(task.status or '?')}</span> {_e(task.task_id)}"
+    )
     sel_blocks = ""
     for mode, sel in sorted(task.selections.items()):
         if sel is None:
             continue
+        kind = "base" if sel["chosen_is_base"] else "final"
+        before, _, after = t8n["blind_line"].partition("{label}")
+        why = sel["why"] or sel["error"] or t8n["no_reason"]
         sel_blocks += (
-            f"<h4>Blind selection · {_e(mode)}</h4>"
-            f"<p>Chose {_kind_span(sel['chosen_label'], 'base' if sel['chosen_is_base'] else 'final')} "
-            f"— <i>{_e(sel['why'] or sel['error'] or 'no reason recorded')}</i></p>"
+            f"<h4>{_e(t8n['blind_title'].format(mode=_mode_label(mode, lang)))}</h4>"
+            f"<p>{_e(before)}{_kind_span(sel['chosen_label'], kind, t8n)}"
+            f"{_e(after.format(why=why))}</p>"
         )
     experience = ""
     if task.experience:
         blocks = "".join(f"<pre>{_e(e)}</pre>" for e in task.experience)
-        experience = f"<h4>Experience</h4>{blocks}"
-    rollouts = "".join(_rollout_details(r) for r in task.rollouts)
+        experience = f"<h4>{_e(t8n['h_experience'])}</h4>{blocks}"
+    rollouts = "".join(_rollout_details(r, t8n) for r in task.rollouts)
     return (
         f"<details><summary>{title}</summary><div class='body'>"
-        f"<p class='muted'>namespace {_e(task.namespace)} · domain {_e(task.domain)} · k={task.k}</p>"
-        f"{sel_blocks}{experience}<h4>Rollouts · {len(task.rollouts)}</h4>{rollouts}"
+        f"<p class='muted'>"
+        f"{_e(t8n['task_meta'].format(ns=task.namespace, domain=task.domain, k=task.k))}</p>"
+        f"{sel_blocks}{experience}"
+        f"<h4>{_e(t8n['h_rollouts'].format(n=len(task.rollouts)))}</h4>{rollouts}"
         "</div></details>"
     )
 
 
-def _domain_table(tasks: Iterable[TaskRecord], mode: str) -> str:
+def _domain_table(tasks: Iterable[TaskRecord], mode: str, lang: str, t8n: dict) -> str:
     """One domain's table for one mode, with its score chart when judged."""
     tasks = sorted(tasks, key=lambda t: t.task_id)
-    head = "<tr><th>task</th><th>status</th><th>pick · score vs base</th></tr>"
+    head = (
+        f"<tr><th>{_e(t8n['col_task'])}</th><th>{_e(t8n['col_status'])}</th>"
+        f"<th>{_e(t8n['col_pick'])}</th></tr>"
+    )
     rows = ""
     for t in tasks:
         rows += (
             f"<tr><td><code>{_e(t.task_id)}</code></td><td>{_e(t.status)}</td>"
-            f"{_mode_cell(t, mode)}</tr>"
+            f"{_mode_cell(t, mode, t8n)}</tr>"
         )
     chart = _score_chart(
         [
@@ -412,13 +579,16 @@ def _domain_table(tasks: Iterable[TaskRecord], mode: str) -> str:
     if judged_pairs:
         mean = sum(a for a, _ in judged_pairs) / len(judged_pairs)
         mean_b = sum(b for _, b in judged_pairs) / len(judged_pairs)
-        gains = (
-            f"<p>{_e(mode)}: refined <b>{_pct(mean)}</b> vs base {_pct(mean_b)} mean over "
-            f"{len(judged_pairs)} judged task(s) — {_delta(mean, mean_b)} pts</p>"
-        )
+        gains = "<p>" + t8n["gains_line"].format(
+            mode=_e(_mode_label(mode, lang)),
+            mean=_pct(mean),
+            mean_b=_pct(mean_b),
+            n=len(judged_pairs),
+            delta=_delta(mean, mean_b),
+        ) + "</p>"
     chart_block = (
         "<figure style='margin:0'>"
-        f"{chart}<figcaption>per-task scores, Δ in points under each pair</figcaption>"
+        f"{chart}<figcaption>{_e(t8n['chart_caption'])}</figcaption>"
         "</figure>"
         if chart
         else ""
@@ -444,7 +614,7 @@ def _ns_gain_domains(tasks: list[TaskRecord]) -> dict[str, float]:
     return {domain: total / counts[domain] for domain, total in sums.items()}
 
 
-def _header_chips(tree: RunTree) -> str:
+def _header_chips(tree: RunTree, t8n: dict) -> str:
     """Top-of-page stat chips: totals and the overall base→refined movement."""
     pairs = [
         (t.judged["agg"]["frac"], t.judged_base["agg"]["frac"])
@@ -461,20 +631,20 @@ def _header_chips(tree: RunTree) -> str:
         1 for t in tree.tasks for s in t.selections.values() if s and s["chosen_is_base"]
     )
     chips = [
-        (str(len(tree.tasks)), "tasks"),
-        (str(len(tree.namespaces())), "namespaces"),
-        (str(chosen_final), "refined adopted"),
-        (str(kept_base), "base kept"),
+        (str(len(tree.tasks)), t8n["chip_tasks"]),
+        (str(len(tree.namespaces())), t8n["chip_namespaces"]),
+        (str(chosen_final), t8n["chip_adopted"]),
+        (str(kept_base), t8n["chip_kept_base"]),
     ]
     if pairs:
         mean_r = sum(a for a, _ in pairs) / len(pairs)
         mean_b = sum(b for _, b in pairs) / len(pairs)
         gain = mean_r - mean_b
-        cls = "up" if gain >= 0 else "down"
+        cls = "delta-up" if gain >= 0 else "delta-down"
         chips += [
-            (_pct(mean_b), "mean base score"),
-            (_pct(mean_r), "mean refined score"),
-            (f'<span class="{cls}">{gain * 100:+.1f} pts</span>', "mean gain"),
+            (_pct(mean_b), t8n["chip_base"]),
+            (_pct(mean_r), t8n["chip_refined"]),
+            (f'<span class="{cls}">{gain * 100:+.1f} pts</span>', t8n["chip_gain"]),
         ]
     return (
         '<div class="chips">'
@@ -487,20 +657,22 @@ def _header_chips(tree: RunTree) -> str:
     )
 
 
-def render(tree: RunTree) -> str:
-    """The whole report as one HTML document string."""
+def render(tree: RunTree, *, lang: str = "zh") -> str:
+    """The whole report as one HTML document string, in `lang` ("zh" or "en")."""
+    if lang not in LANGS:
+        raise ValueError(f"lang must be one of {LANGS}, got {lang!r}")
+    t8n = _T[lang]
     by_ns: dict[str, list[TaskRecord]] = defaultdict(list)
     for t in tree.tasks:
         by_ns[t.namespace].append(t)
     sections = ""
     for ns in sorted(by_ns):
         tasks = by_ns[ns]
-        parts = [f"<h2>{_e(ns)} · {len(tasks)} task(s)</h2>"]
+        parts = [f"<h2>{_e(t8n['ns_header'].format(ns=ns, n=len(tasks)))}</h2>"]
         gain_chart = _gain_chart(_ns_gain_domains(tasks))
         if gain_chart:
             parts.append(
-                '<div class="card"><h3 style="margin-top:0">'
-                "mean gain per domain · parallel mode</h3>"
+                f'<div class="card"><h3 style="margin-top:0">{_e(t8n["gain_title"])}</h3>'
                 f"{gain_chart}</div>"
             )
         by_domain: dict[str, list[TaskRecord]] = defaultdict(list)
@@ -510,33 +682,39 @@ def render(tree: RunTree) -> str:
         for domain in sorted(by_domain):
             domain_tasks = sorted(by_domain[domain], key=lambda x: x.task_id)
             for mode in modes:
-                parts.append(f"<h3>domain · {_e(domain)} · {_e(mode)}</h3>")
-                parts.append(_domain_table(domain_tasks, mode))
-            parts.extend(_task_section(t) for t in domain_tasks)
+                parts.append(
+                    f"<h3>{_e(t8n['domain_mode'].format(domain=domain, mode=_mode_label(mode, lang)))}</h3>"
+                )
+                parts.append(_domain_table(domain_tasks, mode, lang, t8n))
+            parts.extend(_task_section(t, lang, t8n) for t in domain_tasks)
         sections += "".join(parts)
     if not tree.tasks:
-        sections = '<div class="card"><p>No summary.json found under this runs root.</p></div>'
+        sections = f'<div class="card"><p>{_e(t8n["empty"])}</p></div>'
     stamp = time.strftime("%Y-%m-%d %H:%M")
+    guide = (
+        f'<details class="card guide"><summary>{_e(t8n["guide_title"])}</summary>'
+        f'<div class="body">{_GUIDE[lang]}</div></details>'
+    )
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "<title>Harness² runs report</title>"
+        f"<title>{_e(t8n['page_title'])}</title>"
         f"<style>{_CSS}</style></head><body><div class='page'>"
-        f"<header><h1>Harness² runs report</h1>"
-        f"<p class='muted'>{_e(tree.root)} · generated {stamp}</p></header>"
-        f"{_header_chips(tree)}"
+        f"<header><h1>{_e(t8n['page_title'])}</h1>"
+        f"<p class='muted'>{_e(t8n['header_meta'].format(root=tree.root, stamp=stamp))}</p></header>"
+        f"{_header_chips(tree, t8n)}"
+        f"{guide}"
         f"{sections}"
-        f"<footer>read-only view of {len(tree.tasks)} task record(s) · "
-        "self-contained HTML, no scripts, no external assets</footer>"
+        f"<footer>{_e(t8n['footer'].format(n=len(tree.tasks)))}</footer>"
         "</div></body></html>"
     )
 
 
-def write(tree: RunTree, out) -> Path:
+def write(tree: RunTree, out, *, lang: str = "zh") -> Path:
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render(tree), encoding="utf-8")
+    out.write_text(render(tree, lang=lang), encoding="utf-8")
     return out
 
 
-__all__ = ["render", "write"]
+__all__ = ["LANGS", "render", "write"]

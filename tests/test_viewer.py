@@ -155,6 +155,22 @@ class ViewerTests(unittest.TestCase):
         demo = render(load(self.root))  # judged present here, charts must appear
         self.assertGreaterEqual(demo.count("<svg"), 2)
 
+    def test_render_is_bilingual(self):
+        zh = render(load(self.root))  # default zh
+        self.assertIn("盲选", zh)
+        self.assertIn("怎么看这份报告", zh)
+        self.assertIn("基线配置", zh)
+        self.assertIn("并行", zh)
+        en = render(load(self.root), lang="en")
+        self.assertIn("Blind selection", en)
+        self.assertIn("How to read this report", en)
+        self.assertIn("parallel", en)
+        # data content stays verbatim in both languages
+        for h in (zh, en):
+            self.assertIn("cleaner deliverable &lt;b&gt;and&lt;/b&gt; correct total", h)
+        with self.assertRaises(ValueError):
+            render(load(self.root), lang="fr")
+
 
 if __name__ == "__main__":
     unittest.main()

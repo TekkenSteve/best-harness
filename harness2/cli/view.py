@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 
 from ..viewer.load import load as load_tree
+from ..viewer.render import LANGS
 from ..viewer.render import write as write_report
 
 
@@ -40,9 +41,17 @@ def main(argv=None):
         default=None,
         help="output HTML path (default: <runs>/report.html)",
     )
+    p.add_argument(
+        "--lang",
+        choices=LANGS,
+        default="zh",
+        help="UI language of the report (data content stays verbatim)",
+    )
     args = p.parse_args(argv)
     tree = load_tree(args.runs)
-    out = write_report(tree, args.output or f"{args.runs.rstrip('/')}/report.html")
+    out = write_report(
+        tree, args.output or f"{args.runs.rstrip('/')}/report.html", lang=args.lang
+    )
     judged = sum(1 for t in tree.tasks for m in t.judged.values() if m)
     print(
         f"{len(tree.tasks)} task record(s) across {len(tree.namespaces())} namespace(s), "
