@@ -27,3 +27,10 @@ dependencies/*
 .idea/
 .vscode/
 .DS_Store
+
+# Tool caches redirected from a read-only $HOME (see .env)
+.npm-cache/
+.uv-cache/
+.uv-python/
+.hf-home/
+.xdg-config/
