@@ -1,0 +1,7 @@
+# dsh-harness 0.2.2 — mirrors dsh/0.2.2 exactly (same CLI version, same env). Only
+# the agent class differs.
+harness:
+  params:
+    DSH_VERSION: "0.2.2-alpha.2"
+  env:
+    DSH_ISOLATED_HOME: "1"

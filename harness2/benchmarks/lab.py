@@ -35,9 +35,12 @@ from .. import config
 from ..core import runmark as RM
 from ..core import tree as HT
 from ..core.spec import BenchPrompts, BenchSpec, resolve_channel_model
+from ..substrate import dsh as DSH
+from ..substrate import registry
 from ..substrate.base import Install, RunRequest
-from ..substrate.codex import CODEX_SURFACE, CodexSubstrate
-from ..substrate.opencode import OPENCODE_SURFACE, OpencodeSubstrate
+from ..substrate.codex import CODEX_SURFACE
+from ..substrate.dsh import DSH_SURFACE
+from ..substrate.opencode import OPENCODE_SURFACE
 from .tasks import discover, select
 
 JUDGE_MODEL = config.LAB_JUDGE_MODEL
@@ -477,13 +480,16 @@ def _require_runtime_scripts() -> frozenset[str]:
 
 def lab_spec(substrate_name: str) -> BenchSpec:
     """The LAB BenchSpec for one substrate cell. A value, not a code path."""
-    if substrate_name not in ("oc", "cx"):
-        raise ValueError(f"substrate must be 'oc' or 'cx', got {substrate_name!r}")
+    install_mode = {"oc": "workspace_config", "cx": "codex_root", "dsh": "dsh_home"}
+    if substrate_name not in install_mode:
+        raise ValueError(
+            f"substrate must be one of {tuple(install_mode)}, got {substrate_name!r}"
+        )
     channel = resolve_channel_model(None, None, effort="high")
     return BenchSpec(
         name="lab",
         runs_root=config.RUNS / "lab",
-        install_mode="workspace_config" if substrate_name == "oc" else "codex_root",
+        install_mode=install_mode[substrate_name],
         prompts=LAB_BASE,
         channels={"proposer": channel, "selector": channel},
         domain_word="practice area",
@@ -518,15 +524,14 @@ class LabAdapter:
         if skill_mode not in ("native", "inline"):
             raise ValueError(f"skill_mode must be 'native' or 'inline', got {skill_mode!r}")
         self.spec = lab_spec(substrate)
-        if substrate == "oc":
-            self.substrate = OpencodeSubstrate(launcher=self._launch_oc)
-            self.model = model or config.SOLVER_MODEL_OC
-            self._results_root = config.RUNS / "lab" / "results" / "oc"
-        else:
-            self.substrate = CodexSubstrate(launcher=self._launch_cx)
-            self.model = model or config.SOLVER_MODEL_CX
-
-            self._results_root = config.RUNS / "lab" / "results" / "cx"
+        launcher = {
+            "oc": self._launch_oc,
+            "cx": self._launch_cx,
+            "dsh": self._launch_dsh,
+        }[substrate]
+        self.substrate = registry.build(substrate, launcher=launcher)
+        self.model = model or config.solver_model_for(substrate)
+        self._results_root = config.RUNS / "lab" / "results" / substrate
         self.timeout = int(timeout or 3600)
         self.skill_mode = skill_mode
         self.solver_effort = solver_effort
@@ -734,6 +739,62 @@ class LabAdapter:
             dirs.append(self._run_dir(run_id))
         return dirs
 
+    def _launch_dsh(self, req: RunRequest, install: Install) -> list[Path]:
+        """One dsh rollout per run id through the lab-repo runner; the runner owns the
+        workspace, the NDJSON capture and metrics.json, and resumes by session id."""
+        runner = config.lab_repo() / "dsh" / "run_dsh_lab.py"
+        _require_runner(runner)
+        dirs = []
+        for run_id in req.run_ids:
+            # BASE is a value here too: stage the (empty) base tree into an isolated
+            # DSH_HOME so a base rollout never touches the operator's ~/.dsh.
+            staged = None
+            if install.extras.get("harness") == "base":
+                staged = DSH.DshSubstrate().materialise(self.base_harness(), self.spec, {})
+                home, scripts = staged.staging_dir / "home", staged.staging_dir / "scripts"
+            else:
+                home, scripts = install.staging_dir / "home", install.staging_dir / "scripts"
+            cmd = [
+                str(config.LAB_PYTHON),
+                "-u",
+                str(runner),
+                "--task",
+                req.task_ref,
+                "--run-id",
+                run_id,
+                "--results-root",
+                str(self._results_root),
+                "--model",
+                self.model,
+                "--timeout",
+                str(req.timeout),
+                "--dsh-home",
+                str(home),
+                "--dsh-bin",
+                str(config.DSH_BIN),
+                "--permission-mode",
+                config.DSH_PERMISSION_MODE,
+            ]
+            if scripts.is_dir() and any(scripts.iterdir()):
+                cmd += ["--scripts-dir", str(scripts)]
+            try:
+                run_detached(
+                    cmd,
+                    cwd=config.lab_repo(),
+                    env=_lab_env(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=req.timeout * 2 + 600,
+                )
+            except subprocess.TimeoutExpired:
+                print(f"  [lab-dsh] runner wall-timeout for {req.task_ref} @ {run_id}", flush=True)
+            finally:
+                if staged is not None:
+                    shutil.rmtree(staged.staging_dir, ignore_errors=True)
+            dirs.append(self._run_dir(run_id))
+        return dirs
+
     def _safe_rmtree(self, d: Path) -> None:
         """rm -rf restricted to this cell's results root — a guard, not a convenience."""
         d = Path(d).resolve()
@@ -759,8 +820,12 @@ class LabAdapter:
 
     def trajectory(self, run_dir: Path, *, obs_trunc: int) -> str:
         """The substrate's ONE renderer over the raw session stream, effectively uncapped."""
-        name = "opencode_session.jsonl" if self.substrate.name == "oc" else "codex_session.jsonl"
-        stream = Path(run_dir) / name
+        stream_name = {
+            "oc": "opencode_session.jsonl",
+            "cx": "codex_session.jsonl",
+            "dsh": "dsh_session.jsonl",
+        }[self.substrate.name]
+        stream = Path(run_dir) / stream_name
         if not stream.is_file():
             return f"(no trajectory recorded for {Path(run_dir).name})"
         return self.substrate.read_trajectory(stream, obs_trunc=obs_trunc, max_chars=10**9)
@@ -823,7 +888,7 @@ class LabAdapter:
         if self.substrate.name == "oc":
             d = self.spec.runs_root / f"_base_harness_{self.skill_mode}_{os.getpid()}"
         else:
-            d = self.spec.runs_root / f"_base_harness_cx_{os.getpid()}"
+            d = self.spec.runs_root / f"_base_harness_{self.substrate.name}_{os.getpid()}"
         with _BASE_LOCK:
             if d not in _BASE_DONE:
                 if self.substrate.name == "oc":
@@ -831,6 +896,17 @@ class LabAdapter:
                         OPENCODE_SURFACE,
                         {
                             "systemprompt.md": _opencode_base_body(self.skill_mode),
+                            "guardrails.md": "",
+                            "LongTermMEMORY.md": "",
+                            "tool_descriptions/tool_guidance.md": "",
+                        },
+                        d,
+                    )
+                elif self.substrate.name == "dsh":
+                    HT.write_tree(
+                        DSH_SURFACE,
+                        {
+                            "systemprompt.md": "",
                             "guardrails.md": "",
                             "LongTermMEMORY.md": "",
                             "tool_descriptions/tool_guidance.md": "",
@@ -938,6 +1014,8 @@ class LabAdapter:
         if self.substrate.name == "oc":
             _require_runner(config.lab_repo() / "opencode" / "run_opencode.py")
             _require_runtime_scripts()
+        elif self.substrate.name == "dsh":
+            _require_runner(config.lab_repo() / "dsh" / "run_dsh_lab.py")
         else:
             _require_runner(config.lab_repo() / "external" / "adapt_runs_cx" / "run_codex_lab.py")
         try:

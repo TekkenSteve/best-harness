@@ -40,15 +40,18 @@ from ..core import runmark as RM
 from ..core import tree as HT
 from ..core.selection import order_graded_first
 from ..core.spec import BenchPrompts, BenchSpec, resolve_channel_model
+from ..substrate import dsh as DSH
 from ..substrate import opencode as OC
+from ..substrate import registry
 from ..substrate.base import Install, RunRequest
-from ..substrate.codex import CODEX_SURFACE, CodexSubstrate
-from ..substrate.opencode import OPENCODE_SURFACE, OpencodeSubstrate
+from ..substrate.codex import CODEX_SURFACE
+from ..substrate.dsh import DSH_SURFACE
+from ..substrate.opencode import OPENCODE_SURFACE
 from . import wb_render as RENDER
 from .tasks import discover, select
 
 SCOREABLE = frozenset({"code", "web", "office"})
-SUBSTRATES = ("oc", "cx")
+SUBSTRATES = ("oc", "cx", "dsh")
 
 _BASE_LOCK = threading.Lock()
 _BASE_DONE: set[Path] = set()
@@ -62,6 +65,10 @@ def _harness_oc(fork: bool) -> str:
 
 def _harness_cx() -> str:
     return f"codex-harness/{config.WB_CX_HARNESS_VER}"
+
+
+def _harness_dsh(*, fork: bool) -> str:
+    return f"{'dsh-harness' if fork else 'dsh'}/{config.WB_DSH_HARNESS_VER}"
 
 
 @dataclass(frozen=True)
@@ -510,6 +517,28 @@ def _job_yaml(
                 hp["prompt_template_path"] = str(composed.resolve())
         hp_lines = "\n".join(f"  {key}: {json.dumps(val)}" for key, val in sorted(hp.items()))
         extra = f"harness_params_override:\n{hp_lines}\n"
+    elif substrate == "dsh":
+        harness = _harness_dsh(fork=ws is not None)
+        hp = {"DSH_PERMISSION_MODE": config.DSH_PERMISSION_MODE}
+        if ws is not None:
+            hp["WB_HARNESS_WS"] = str(ws.resolve())
+            composed = ws / "_composed" / "prompt.j2"
+            if composed.is_file():
+                hp["prompt_template_path"] = str(composed.resolve())
+        hp_lines = "\n".join(f"  {key}: {json.dumps(val)}" for key, val in sorted(hp.items()))
+        env_lines = (
+            f"  DEEPSEEK_BASE_URL: {json.dumps(config.WB_DSH_CONTAINER_URL)}\n"
+            if config.WB_DSH_CONTAINER_URL
+            else ""
+        )
+        extra = (
+            "extra_allowed_hosts:\n"
+            "  - host.docker.internal\n"
+            "harness_params_override:\n"
+            f"{hp_lines}\n"
+            "env_override:\n"
+            f"{env_lines}"
+        )
     else:
         harness = _harness_cx()
         hp = {"CODEX_MODEL": config.SOLVER_MODEL_CX}
@@ -653,10 +682,13 @@ def run_batch(
 def spec_for(subset: str, substrate: str) -> BenchSpec:
     s = SUBSETS[subset]
     channel = resolve_channel_model(None, None, effort="high")
+    # oc and dsh both compose a prompt template for the container agent (the bench
+    # renders {{ instruction }} into it); codex ships its own root config.
+    install_mode = {"oc": "home_dir_jinja", "cx": "codex_root", "dsh": "home_dir_jinja"}
     return BenchSpec(
         name=f"wb-{subset}",
         runs_root=config.RUNS / "wb" / subset,
-        install_mode="home_dir_jinja" if substrate == "oc" else "codex_root",
+        install_mode=install_mode[substrate],
         prompts=workbuddy_prompts(subset),
         channels={"proposer": channel, "selector": channel},
         domain_word="category",
@@ -682,11 +714,7 @@ class WbAdapter:
         self.subset = subset
         self.subset_info = SUBSETS[subset]
         self.spec = spec_for(subset, substrate)
-        self.substrate = (
-            OpencodeSubstrate(launcher=self._launch)
-            if substrate == "oc"
-            else CodexSubstrate(launcher=self._launch)
-        )
+        self.substrate = registry.build(substrate, launcher=self._launch)
 
     def tasks(self, split: str = "all") -> list[str]:
         return select(
@@ -737,11 +765,19 @@ class WbAdapter:
 
     def _cell_identity(self) -> dict:
         """What makes two rollouts of one label the same rollout, beyond the harness."""
-        return {
-            "solver": config.SOLVER_MODEL_OC
-            if self.substrate.name == "oc"
-            else config.SOLVER_MODEL_CX,
+        version_key = {
+            "oc": "oc_ver",
+            "cx": "cx_ver",
+            "dsh": "dsh_ver",
+        }[self.substrate.name]
+        version = {
             "oc_ver": config.WB_OC_HARNESS_VER,
+            "cx_ver": config.WB_CX_HARNESS_VER,
+            "dsh_ver": config.WB_DSH_HARNESS_VER,
+        }[version_key]
+        return {
+            "solver": config.solver_model_for(self.substrate.name),
+            version_key: version,
             "connection": config.WB_MODEL_CONNECTION,
         }
 
@@ -861,7 +897,11 @@ class WbAdapter:
         return RENDER.body_chars(Path(run_dir), self.subset) >= 200
 
     def trajectory_path(self, run_dir: Path) -> Path:
-        stream = "oc-output.txt" if self.substrate.name == "oc" else "codex-output.jsonl"
+        stream = {
+            "oc": "oc-output.txt",
+            "cx": "codex-output.jsonl",
+            "dsh": "dsh-output.jsonl",
+        }[self.substrate.name]
         return Path(run_dir) / "agent" / stream
 
     def trajectory(self, run_dir: Path, *, obs_trunc: int) -> str:
@@ -907,6 +947,18 @@ class WbAdapter:
                         d,
                         stubs=True,
                     )
+                elif self.substrate.name == "dsh":
+                    HT.write_tree(
+                        DSH_SURFACE,
+                        {
+                            "systemprompt.md": "",
+                            "guardrails.md": "",
+                            "LongTermMEMORY.md": "",
+                            "tool_descriptions/tool_guidance.md": "",
+                        },
+                        d,
+                        stubs=True,
+                    )
                 else:
                     HT.write_tree(
                         CODEX_SURFACE,
@@ -923,13 +975,17 @@ class WbAdapter:
         return d
 
     def validate_tree(self, tree: dict[str, str]) -> None:
-        """oc: check the Jinja invariant on the COMPOSED template, so a brace in a skill's
-        `description:` is a rejected proposal rather than a dead trial. cx: nothing."""
-        if self.substrate.name != "oc":
-            return
-        with tempfile.TemporaryDirectory() as td:
-            staged = HT.write_tree(OPENCODE_SURFACE, tree, Path(td) / "h")
-            OC.assert_jinja_safe(OC.compose_prompt(staged))
+        """oc/dsh: check the Jinja invariant on the COMPOSED template, so a brace in a
+        skill's `description:` is a rejected proposal rather than a dead trial. cx:
+        nothing."""
+        if self.substrate.name == "oc":
+            with tempfile.TemporaryDirectory() as td:
+                staged = HT.write_tree(OPENCODE_SURFACE, tree, Path(td) / "h")
+                OC.assert_jinja_safe(OC.compose_prompt(staged))
+        elif self.substrate.name == "dsh":
+            with tempfile.TemporaryDirectory() as td:
+                staged = HT.write_tree(DSH_SURFACE, tree, Path(td) / "h")
+                OC.assert_jinja_safe(DSH.compose_prompt(staged))
 
     def preflight(self) -> None:
         """Check the benchmark checkout and executor before starting containers."""
@@ -944,11 +1000,13 @@ class WbAdapter:
                 f"the WorkBuddy-Bench checkout at {repo} has no scripts/run.sh — run "
                 f"scripts/setup_benchmark.py wb"
             )
-        slugs = (
-            [_harness_oc(fork=False), _harness_oc(fork=True)]
-            if self.substrate.name == "oc"
-            else [_harness_cx()]
-        )
+        slugs = {
+            "oc": [_harness_oc(fork=False), _harness_oc(fork=True)],
+            "cx": [_harness_cx()],
+            # The binary lives in the container mount image, so no host-binary
+            # preflight here: the harness entries below are what the batch needs.
+            "dsh": [_harness_dsh(fork=False), _harness_dsh(fork=True)],
+        }[self.substrate.name]
         for slug in slugs:
             family, _, ver = slug.partition("/")
             entry = repo / "configs" / "harnesses" / family / "versions" / f"{ver}.yaml"
@@ -960,7 +1018,7 @@ class WbAdapter:
                 )
         if self.substrate.name == "cx":
             self.substrate.preflight(require_dist=True, require_bridge=True)
-        else:
+        elif self.substrate.name == "oc":
             self.substrate.preflight()
 
     def _killed(self, run_dir: Path) -> bool:

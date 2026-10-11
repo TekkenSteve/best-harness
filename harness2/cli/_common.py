@@ -26,10 +26,11 @@ from pathlib import Path
 from ..core import library as LIB
 from ..core import schedule as SCHED
 from ..core.spec import BenchmarkAdapter
+from ..substrate import registry
 
 BENCHES = ("jb", "wb", "lab")
 WB_SUBSETS = ("office", "web", "code")
-SUBSTRATES = ("oc", "cx")
+SUBSTRATES = registry.names()
 
 MODES_DEFAULT = "parallel"
 MODES_HELP = (
@@ -104,7 +105,7 @@ def add_cell_args(p: argparse._ActionsContainer) -> None:
         "--substrate",
         default="oc",
         choices=SUBSTRATES,
-        help="task-executor substrate: oc (opencode) | cx (codex)",
+        help=f"task-executor substrate: {registry.help_text()}",
     )
 
 

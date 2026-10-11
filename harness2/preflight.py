@@ -22,7 +22,7 @@ import subprocess
 
 from . import config
 from .install import PATCHES, missing_runners
-from .substrate.opencode import OpencodeSubstrate
+from .substrate import registry
 
 
 def check(adapter, *, judge=False) -> list[str]:
@@ -46,7 +46,9 @@ def check(adapter, *, judge=False) -> list[str]:
     for validate in (
         lambda: config.validate_models(judge=judge),
         adapter.tasks,
-        OpencodeSubstrate().preflight,
+        # The cell's OWN substrate preflight (credentials, binary, endpoint), not a
+        # hardcoded one: a dsh cell must not be blocked on OpenCode's checkout.
+        registry.build(adapter.substrate.name).preflight,
         adapter.preflight,
     ):
         try:
@@ -127,7 +129,7 @@ def check(adapter, *, judge=False) -> list[str]:
                 repo / ".venv/bin/python",
                 "-c",
                 "import harbor; from workbuddy_bench.runner.harness_adapters import HARNESS_ADAPTERS; "
-                "assert all(k in HARNESS_ADAPTERS for k in ('opencode', 'oc-harness', 'codex-harness'))",
+                "assert all(k in HARNESS_ADAPTERS for k in ('opencode', 'oc-harness', 'codex-harness', 'dsh', 'dsh-harness'))",
             ],
             cwd=repo,
         )

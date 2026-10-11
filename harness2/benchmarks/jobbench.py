@@ -38,9 +38,11 @@ from ..core import runmark as RM
 from ..core import tree as HT
 from ..core.spec import BenchPrompts, BenchSpec, resolve_channel_model
 from ..install import codex_config_error
+from ..substrate import dsh as DSH
+from ..substrate import registry
 from ..substrate.base import Install, RunRequest
-from ..substrate.codex import CodexSubstrate
-from ..substrate.opencode import OUTPUT_TOKEN_MAX, OpencodeSubstrate
+from ..substrate.opencode import OUTPUT_TOKEN_MAX
+from .jb_opencode_runner import PROMPT as _JB_PROMPT
 from .tasks import discover, select
 
 _RUNNER_DIR = config.THIRD_PARTY / "jb_runner"
@@ -50,6 +52,7 @@ OC_RUNNER = Path(__file__).resolve().parent / "jb_opencode_runner.py"
 CX_RUNNER = _RUNNER_DIR / "run_benchmark_codex_cli_adapt.sh"
 OC_BASE_HARNESS = _RUNNER_DIR / "harness_baseline_oc"
 CX_BASE_HARNESS = _RUNNER_DIR / "codex_base_harness"
+DSH_BASE_HARNESS = _RUNNER_DIR / "harness_baseline_dsh"
 
 
 def run_detached(cmd: list[str], *, timeout: int, **kw) -> None:
@@ -494,9 +497,9 @@ def render_opencode_tree(staged: Path, render_dir: Path, ctx: dict) -> None:
             shutil.copy(p, rd / ".opencode" / "plugin" / p.name)
 
 
-_INSTALL_MODE = {"oc": "workspace_agents_md", "cx": "codex_root"}
+_INSTALL_MODE = {"oc": "workspace_agents_md", "cx": "codex_root", "dsh": "dsh_home"}
 
-_DEFAULT_TIMEOUT = {"oc": 2400, "cx": 3600}
+_DEFAULT_TIMEOUT = {"oc": 2400, "cx": 3600, "dsh": 2400}
 
 
 def _channels() -> dict:
@@ -507,7 +510,7 @@ def _channels() -> dict:
 
 def make_spec(substrate: str) -> BenchSpec:
     if substrate not in _INSTALL_MODE:
-        raise ValueError(f"JobBench substrate must be 'oc' or 'cx', got {substrate!r}")
+        raise ValueError(f"JobBench substrate must be one of {tuple(_INSTALL_MODE)}, got {substrate!r}")
     return BenchSpec(
         name="jb",
         runs_root=config.RUNS / "jb",
@@ -632,12 +635,12 @@ class JobBenchAdapter:
     ):
         self.split_file = split_file
         self.spec = make_spec(substrate)
-        launcher = self._launch_opencode if substrate == "oc" else self._launch_codex
-        self.substrate = (
-            OpencodeSubstrate(launcher=launcher)
-            if substrate == "oc"
-            else CodexSubstrate(launcher=launcher)
-        )
+        launcher = {
+            "oc": self._launch_opencode,
+            "cx": self._launch_codex,
+            "dsh": self._launch_dsh,
+        }[substrate]
+        self.substrate = registry.build(substrate, launcher=launcher)
         self.timeout = int(timeout or _DEFAULT_TIMEOUT[substrate])
         self.store = Path(store_root) if store_root else config.RUNS / "jb" / "dataset"
 
@@ -829,6 +832,57 @@ class JobBenchAdapter:
         self._run_runner(CX_RUNNER, env, wall=t + 600, label=label)
         return [self._require_artifacts(task_id, label)]
 
+    def _launch_dsh(self, req: RunRequest, install: Install) -> list[Path]:
+        """One dsh headless rollout: the agent works in a temp workspace, deliverables
+        land in <workspace>/output per the shared JobBench prompt, and the NDJSON run
+        events stream straight into model_traj/."""
+        task_id, label, t = self._launch_common(req)
+        self.substrate.preflight()
+        task_dir = self._ensure_store_task(task_id)
+        traj_dir = self._traj_dir(task_id, label)
+        traj_dir.mkdir(parents=True, exist_ok=True)
+        stem = task_id.replace("/", "_")
+        workspace = Path(tempfile.mkdtemp(prefix=f"dsh_jb_{stem}_{label}_"))
+        try:
+            shutil.copytree(task_dir, workspace / "task_folder")
+            output_dir = workspace / "output"
+            output_dir.mkdir()
+            scripts_dir = install.staging_dir / "scripts"
+            if scripts_dir.is_dir() and any(scripts_dir.iterdir()):
+                shutil.copytree(scripts_dir, workspace / "harness_scripts")
+            prompt = _JB_PROMPT.format(
+                task_folder=workspace / "task_folder",
+                output_dir=output_dir,
+                workspace=workspace,
+            )
+            traj_file = traj_dir / f"{stem}_{label}_attempt1_{DSH.stamp()}.jsonl"
+            argv = self.substrate.run_argv()
+            env = self.substrate.run_env(os.environ, dsh_home=install.staging_dir / "home")
+            try:
+                DSH.run_rollout(
+                    argv,
+                    task_text=prompt,
+                    cwd=workspace,
+                    env=env,
+                    stdout_path=traj_file,
+                    stderr_path=traj_dir / f"{stem}_{label}_dsh.log",
+                    timeout=t,
+                )
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(
+                    f"dsh wall-timeout ({t}s) for {label}; artifacts left UNMARKED so the "
+                    f"next attempt re-rolls instead of adopting a truncated rollout"
+                ) from None
+            if output_dir.is_dir() and any(output_dir.iterdir()):
+                out = self._out_dir(task_id, label)
+                out.mkdir(parents=True, exist_ok=True)
+                for item in sorted(output_dir.iterdir()):
+                    if not item.name.startswith("."):
+                        shutil.move(str(item), str(out / item.name))
+        finally:
+            shutil.rmtree(workspace, ignore_errors=True)
+        return [self._require_artifacts(task_id, label)]
+
     def _run_runner(self, runner: Path, env: dict, *, wall: int, label: str) -> None:
         """Run the packaged launcher; timeouts leave the rollout incomplete."""
         if not runner.is_file():
@@ -948,7 +1002,11 @@ class JobBenchAdapter:
         return str(self._extract(d)["flat"]) if d.is_dir() else ""
 
     def base_harness(self) -> Path:
-        base = OC_BASE_HARNESS if self.substrate.name == "oc" else CX_BASE_HARNESS
+        base = {
+            "oc": OC_BASE_HARNESS,
+            "cx": CX_BASE_HARNESS,
+            "dsh": DSH_BASE_HARNESS,
+        }[self.substrate.name]
         if not HT.is_tree(self.substrate.surface(), base):
             raise FileNotFoundError(
                 f"JobBench base harness missing or not a {self.substrate.surface().name} "

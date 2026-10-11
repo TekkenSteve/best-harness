@@ -1,0 +1,20 @@
+# dsh-harness: dsh + a mounted harness workspace (staged by benchmarks/workbuddy.py).
+# Identical to the dsh family except for the agent class, so an EMPTY harness
+# workspace reproduces stock dsh exactly. Reuses the dsh mount image so the CLI is
+# byte-identical.
+
+harness:
+  name: dsh-harness
+  import_path: "workbuddy_bench.agents.dsh_harness_agent:DshHarnessAgent"
+  protocol: anthropic
+  params:
+    DSH_MAX_TURNS: null
+    DSH_PERMISSION_MODE: "workspace-write"
+  mount:
+    name: dsh
+    path: /opt/dsh
+    dockerfile: configs/harnesses/dsh/docker/Dockerfile
+    context: configs/harnesses/dsh/docker
+    build:
+      args:
+        MOUNT_PATH: /opt/dsh

@@ -1,0 +1,27 @@
+# dsh: DeepSeek Harness (headless) container harness defaults.
+#
+# dsh speaks the Anthropic Messages protocol through its llm-deepseek provider:
+# DEEPSEEK_BASE_URL names a Messages-compatible HTTP(S) root (the public default is
+# https://api.deepseek.com/anthropic), so the backend route must serve that protocol —
+# an OpenAI-only endpoint cannot be reused as-is, unlike opencode/codex.
+
+harness:
+  name: dsh
+  import_path: "workbuddy_bench.agents.dsh_agent:DshAgent"
+  protocol: anthropic
+  params:
+    # dsh headless has no --max-turns; the loop is bounded by Harbor's per-trial
+    # timeout. Declared for YAML-shape parity with the other harnesses, left null
+    # so it never implies an enforced cap.
+    DSH_MAX_TURNS: null
+    # The permission preset is the tool fence: workspace-write keeps the rollout in
+    # its own workspace, and --approval-policy never keeps it unattended.
+    DSH_PERMISSION_MODE: "workspace-write"
+  mount:
+    name: dsh
+    path: /opt/dsh
+    dockerfile: configs/harnesses/dsh/docker/Dockerfile
+    context: configs/harnesses/dsh/docker
+    build:
+      args:
+        MOUNT_PATH: /opt/dsh

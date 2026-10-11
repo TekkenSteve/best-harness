@@ -1,0 +1,27 @@
+# Owned harness manifest for the JobBench dsh harness (v0 baseline).
+# Lists the EVOLVABLE components as editable files. The dsh runtime (CLI, the
+# headless profile, its permission presets, the provider) is FROZEN infrastructure
+# and is NOT referenced here. An evolve loop edits files under this workspace only.
+name: jobbench_dsh_harness
+
+components:
+  system_prompt: systemprompt.md                      # c1 — composed into $DSH_HOME/AGENTS.md
+  guardrails: guardrails.md                           # c6 — always-on rules + skill trigger lines
+  long_term_memory: LongTermMEMORY.md                 # c3 — durable domain facts
+  skills_dir: skills/                                 # c6 — staged to $DSH_HOME/skills/<n>/SKILL.md
+                                                     #      (the dsh-skill-filesystem user root)
+  scripts_dir: scripts/                               # c7 — delivered to <workspace>/harness_scripts
+  tool_guidance: tool_descriptions/tool_guidance.md   # c4 — prose guidance about the dsh toolset
+  sub_agents_dir: sub_agents/                         # c5 — RESERVED: dsh teammates are runtime-
+                                                     #      spawned, not file-configured; the
+                                                     #      validator rejects edits for now
+  # c8 plugins: NOT injectable yet — dsh plugins are profile-managed npm bundles, so a
+  #             per-rollout install mode would be needed first.
+
+# The harness is injected in COMPOSED mode: always-on text + a skill index become
+# $DSH_HOME/AGENTS.md; the task itself arrives through the headless CLI prompt, never
+# through this file. dsh/provider defaults (temperature, step caps) are intentionally
+# left untouched, mirroring the oc v0 baseline.
+agent_config_values: {}
+
+compose_order: [system_prompt, guardrails, long_term_memory, skills]

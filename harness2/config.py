@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -98,8 +99,23 @@ os.environ.setdefault("GOOGLE_CLOUD_LOCATION", VERTEX_REGION)
 
 SOLVER_MODEL_OC = env("HARNESS2_SOLVER_MODEL", "")
 SOLVER_MODEL_CX = env("HARNESS2_CODEX_MODEL", SOLVER_MODEL_OC.split("/", 1)[-1])
+SOLVER_MODEL_DSH = env("HARNESS2_SOLVER_MODEL_DSH", "")
 IMPROVER_MODEL = env("HARNESS2_IMPROVER_MODEL", SOLVER_MODEL_OC)
 JUDGE_MODEL = env("HARNESS2_JUDGE_MODEL", "")
+
+
+def solver_model_for(substrate: str) -> str:
+    """The executor identity a run's metadata records, per substrate token.
+
+    dsh resolves its model inside DSH itself (an isolated DSH_HOME per rollout), so
+    the value is only what the operator declares for the record.
+    """
+    return {"oc": SOLVER_MODEL_OC, "cx": SOLVER_MODEL_CX, "dsh": SOLVER_MODEL_DSH}[substrate]
+
+
+# dsh headless: the binary and the permission preset every rollout runs under.
+DSH_BIN = env("HARNESS2_DSH_BIN", "") or shutil.which("dsh") or ""
+DSH_PERMISSION_MODE = env("HARNESS2_DSH_PERMISSION_MODE", "workspace-write")
 
 DEPENDENCY_PINS = {
     "job-bench-eval": "fa03a17f9ff662f136798a274e10011c3aa00fd0",
@@ -167,8 +183,10 @@ WB_WEB_JUDGE = "harness2/judge"
 WB_RENDER_PY = sys.executable
 WB_OC_HARNESS_VER = "1.14.18"
 WB_CX_HARNESS_VER = CODEX_VERSION
-WB_MAX_JOBS = {"oc": 1, "cx": 1}
-WB_MAX_TRIALS = {"oc": 2, "cx": 2}
+WB_DSH_HARNESS_VER = "0.2.2"
+WB_DSH_CONTAINER_URL = env("HARNESS2_DSH_CONTAINER_BASE_URL", "")
+WB_MAX_JOBS = {"oc": 1, "cx": 1, "dsh": 1}
+WB_MAX_TRIALS = {"oc": 2, "cx": 2, "dsh": 2}
 WB_MODEL_CONNECTION = "local_proxy"
 
 DEFAULT_PROPOSER_CHANNEL = "opencode"

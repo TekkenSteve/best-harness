@@ -1,0 +1,8 @@
+# dsh 0.2.2 (npm 0.2.2-alpha.2) — version + env only; _defaults.yaml carries the rest.
+harness:
+  params:
+    DSH_VERSION: "0.2.2-alpha.2"
+  env:
+    # The rollout home is staged per trial by dsh_agent (DSH_HOME); never inherit a
+    # baked profile, and never let a task repo contribute instructions.
+    DSH_ISOLATED_HOME: "1"

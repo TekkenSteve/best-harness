@@ -21,6 +21,7 @@ import shutil
 import subprocess
 
 from harness2 import config, install
+from harness2.cli._common import SUBSTRATES
 
 
 def main(argv=None):
@@ -32,7 +33,7 @@ def main(argv=None):
         default=None,
         help="wb only: one subset to install; omitted installs office, web, and code",
     )
-    p.add_argument("--substrate", choices=("oc", "cx"), default="oc")
+    p.add_argument("--substrate", choices=SUBSTRATES, default="oc")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
     if args.subset and args.benchmark != "wb":
@@ -90,7 +91,14 @@ def main(argv=None):
             install.run(
                 ["bash", "scripts/dataset/fetch-dataset.sh", *subsets], cwd=repo, dry_run=dry
             )
-            if args.substrate == "oc":
+            if args.substrate in ("oc", "dsh"):
+                # oc and dsh CLI mounts are prebuilt here: run_batch sets NO_FORCE_BUILD=1,
+                # so a trial never builds an image. dsh-harness reuses the dsh image.
+                harness_slug = (
+                    f"opencode/{config.WB_OC_HARNESS_VER}"
+                    if args.substrate == "oc"
+                    else f"dsh/{config.WB_DSH_HARNESS_VER}"
+                )
                 install.run(
                     [
                         "uv",
@@ -99,7 +107,7 @@ def main(argv=None):
                         "bash",
                         "scripts/harness/build-harness-mounts.sh",
                         "--harness",
-                        "opencode/1.14.18",
+                        harness_slug,
                     ],
                     cwd=repo,
                     dry_run=dry,
