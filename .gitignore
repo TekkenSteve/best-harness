@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Experiment outputs and local task partitions (scripts/split_tasks.py writes
+# splits/ as local files, never release assets)
+runs/
+splits/
+
+# Credentials (README: cp .env.example .env)
+.env
+.env.*
+!.env.example
+
+# Benchmark checkouts and toolchains installed by harness2-setup. The three
+# curated files tracked in git are re-included below; everything else under
+# dependencies/ is pinned runtime state, reproducible from PINNED.md.
+dependencies/*
+!dependencies/ASSETS.json
+!dependencies/PINNED.md
+!dependencies/README.md
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
