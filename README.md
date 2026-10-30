@@ -1,209 +1,175 @@
-<h3 align="center">
-  <img src="assets/Harness2-wordmark.png" alt="Harness²" width="360"><br>
-  Recursive Agent Harnessing for an Open World
-</h3>
+# best-harness
 
-<p align="center">
+> A **scenario-fit evaluation workbench for open-source agent harnesses**, built on
+> [Google Harness²](https://github.com/google-research/harness2) — answer "which
+> open-source agent framework fits *my* workload best?", and get your harness
+> configuration auto-improved in the same run.
+
+English · **[中文](README.zh.md)**
+
+<p>
   <a href="https://arxiv.org/pdf/2610.14224"><img src="https://img.shields.io/badge/Paper-arXiv-EA4335?logo=arxiv&logoColor=white" alt="Paper"></a>
-  <a href="https://harness2.github.io"><img src="https://img.shields.io/badge/Website-harness2.github.io-4285F4?logo=googlechrome&logoColor=white" alt="Website"></a>
-  <a href="docs/BENCHMARKS.md"><img src="https://img.shields.io/badge/Docs-Benchmark%20guides-FBBC04" alt="Benchmark guides"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-34A853" alt="License"></a>
 </p>
 
-<p align="center">
-  <a href="docs/BENCHMARKS.md#jobbench">
-    <img src="assets/harness2-setup.gif" alt="Install, set up, and run JobBench: uv pip install -e '.[render]', harness2-setup jb, then harness2 --bench jb --k 1 --mode parallel. Click for prerequisites and commands." width="640">
-  </a>
+<p>
+  <img src="assets/scenario-fit.svg" alt="One run, two answers: which framework fits your scenario, and how the config can still improve" width="900">
 </p>
 
-A **harness** is the system around a model that enables it to act as an agent:
-prompts, tools, memory, skills, orchestration, and more. **Harnessing** is the
-process of optimizing that system.
+## What this is
 
-Harness² is a plug-and-play framework for **recursive agent harnessing** in an
-open world, where agents encounter tasks unseen during harness design. It
-connects two levels of recursion while keeping model weights fixed:
+OpenCode, Codex, DeepSeek Harness… the list of open-source agent frameworks keeps
+growing, but "which one fits *my* scenario" has never had a quantitative answer —
+public leaderboards measure someone else's workload, not yours.
 
-* **Task-level recursion** refines the execution harness for the current task
-  through a contrastive **Propose–Probe–Compose** step: propose edits, probe
-  their effects on the same task, and compose a refined harness from behavioral
-  contrasts between executions, without ground-truth feedback.
-* **Harnessing-level recursion** updates a persistent *improvement harness*
-  with adopted harnesses and evidence-supported lessons from each task to guide
-  future refinement.
+best-harness does three things:
 
-<p align="center">
-  <a href="assets/harness2_pipeline.png">
-    <img src="assets/harness2_pipeline.png" alt="Harness² pipeline. Task-level recursion: an agent executor runs the initial harness, a harness editor proposes invariant and domain edits, candidate probes execute them, and a harness composer combines them into the final harness. Harnessing-level recursion: an experience reflector reflects on the step and updates the improvement harness used for the next task." width="100%">
-  </a>
+1. **Comparable head-to-head**: multiple agent frameworks run the **same task set**
+   under the **same judge**, compared domain by domain — that is what scenario fit
+   actually means;
+2. **Automatic optimization suggestions**: the Harness² Propose–Probe–Compose loop
+   refines the harness (prompt, guardrails, memory, skills, scripts) on every task,
+   leaving a reviewable diff and behavioral evidence for each change;
+3. **Visual reporting**: `harness2-view` renders a runs directory into a
+   self-contained HTML report — per-domain gain charts, blind-selection provenance,
+   and replayable trajectories.
+
+## Key mechanisms
+
+### A harness is the editable configuration around the model
+
+Model weights never change. What gets tuned are the eight component groups around
+the model: **system prompt, guardrails, long-term memory, tool guidance, subagents,
+skills, scripts, plugins**. Every proposed candidate is a real tree of files on
+disk — reviewable and diffable.
+
+### Propose–Probe–Compose (PPC)
+
+```
+Same task: run the base harness ──▶ the improver reads trajectories and proposes
+candidates (inv = general, dom = domain-specific)
+──▶ every candidate is probed on the SAME task (harness is the only variable)
+──▶ the composer picks and merges from observed behavioral contrasts ──▶ final harness
+```
+
+**No score ever enters the optimization loop** — the improver sees behavioral
+evidence only (trajectories, deliverables, diffs) and never the grading criteria,
+so the method cannot overfit the judge by construction.
+
+### Blind selection, scoring only after the pick
+
+Final deliverables are anonymized as A/B (the mapping is shuffled by a task-hash
+seed); the selector sees content, not provenance. Only after the pick does the LLM
+judge grade it, rubric by rubric. A failed judge is recorded as *ungraded*, never
+as zero. The full judging funnel and data-flow walkthrough (Chinese) live in
+[docs/WALKTHROUGH.zh.md](docs/WALKTHROUGH.zh.md).
+
+### Per-domain gains: scenario fit, quantified
+
+<p>
+  <img src="assets/report-gain.svg" alt="Real run example: base 68.8% → refined 90.6%, +21.9 pts" width="900">
 </p>
 
-Across three professional benchmarks and four model–harness configurations, a
-single Harness² step improves GLM-5 and Gemini 3.5 Flash over their base
-harnesses, with gains of up to 11.5 points on WorkBuddy-Bench, 4.5 points on
-JobBench, and 11.8 percentage points on LAB's partial pass rate. Increasing the
-task-level recursion budget brings further gains.
+The report aggregates mean refined-vs-base gain per domain — which domains benefit
+from harness tuning and which are fine as-is, at a glance. Re-run the same task set
+under another executor and you have a framework-level comparison.
 
-The release supports **parallel and sequential recursion**, **OpenCode and
-Codex executors**, and **JobBench, LAB, and WorkBuddy-Bench**.
+### Cross-task experience library
 
-## Video overview
+Each finished task distills a cue/lesson/evidence entry into a domain-isolated
+library, read by the proposer of later tasks in the same domain — the harness keeps
+improving along the task stream.
 
-https://github.com/user-attachments/assets/76b10548-b14b-4c8f-9aa5-a93662df4d56
+## Executors and benchmarks
 
-## Contents
+| Executor (substrate) | Status | Notes |
+|---|---|---|
+| OpenCode (`oc`) | upstream | three install modes |
+| Codex CLI (`cx`) | upstream | configurable Responses endpoint |
+| **DeepSeek Harness (`dsh`)** | **added in this fork** | headless NDJSON trajectories, isolated DSH_HOME, WB container image |
 
-- [Video overview](#video-overview)
-- [Harness components](#harness-components)
-- [Install](#install)
-- [Run a benchmark](#run-a-benchmark)
-- [Experiments](#experiments)
-- [Web access](#web-access)
-- [Results and resume](#results-and-resume)
-- [Citation](#citation)
-- [Contributing](#contributing)
-- [License](#license)
-- [Disclaimer](#disclaimer)
+| Benchmark | Tasks | Scoring |
+|---|---|---|
+| JobBench | professional work (35 domains) | LLM judge over weighted rubrics |
+| LAB | legal work (1,143 tasks) | LLM judge per criterion, Partial + All-pass |
+| WorkBuddy | office / web / code | container verifier (the code subset is a hard test-pass score) |
+| your own task set | —— | see "Add your own bench" below |
 
-## Harness components
-
-Harness² exposes eight editable components around the model: **system prompt,
-guardrails, memory, tool guidance, subagents, skills, scripts, and plugins**.
-They control context construction, the tool interface, delegation, and behavior
-inside the tool loop.
-
-<p align="center">
-  <a href="assets/components.png">
-    <img src="assets/components.png" alt="Eight harness components grouped by runtime role: system prompt, guardrails, memory, and skills construct context; tool guidance and scripts define the tool interface; subagents orchestrate delegated work; plugins control middleware." width="100%">
-  </a>
-</p>
-
-## Install
-
-Use **Linux, Python 3.12, and [uv](https://docs.astral.sh/uv/getting-started/installation/)**.
-From the repository root:
+## Quick start
 
 ```bash
-uv venv --python 3.12 .venv
-source .venv/bin/activate
+# Install (Linux, Python 3.12, uv)
+uv venv --python 3.12 .venv && source .venv/bin/activate
 uv pip install -e '.[render]'
+
+# Credential-free local demo (both recursion modes, deterministic editors)
 harness2-demo --output runs/demo --k 2
+
+# Run a real benchmark (JobBench + codex example; set endpoint and key in .env)
+harness2-setup jb
+harness2-check --bench jb --substrate cx
+harness2 --bench jb --substrate cx --k 1 --mode parallel --max-tasks 1
+harness2-judge --bench jb --substrate cx --k 1 --mode parallel
+harness2-judge --bench jb --substrate cx --k 1 --mode parallel --bases   # base scores for the gain chart
+
+# Render the visual report (Chinese UI by default; --lang en for English)
+harness2-view --runs runs -o runs/report.html
 ```
 
-The local demo runs both recursion modes with deterministic editors and real
-Python executions. It requires no model credentials.
+Model roles are configured independently in `.env`: `HARNESS2_SOLVER_MODEL` /
+`HARNESS2_CODEX_*` (executor), `HARNESS2_IMPROVER_MODEL` (improver), and
+`HARNESS2_JUDGE_MODEL` (judge, any OpenAI-compatible endpoint). See
+[docs/SETUP.md](docs/SETUP.md).
 
-For model-backed benchmarks, install **Node.js 20+, the Google Cloud CLI**, and
-the [benchmark dependencies](docs/SETUP.md#requirements). LAB needs Pandoc and
-Poppler; WorkBuddy-Bench needs Docker. Then configure your models:
+## Add your own bench
 
-```bash
-cp .env.example .env
-# Edit .env with your Vertex AI project and model IDs.
-gcloud auth application-default login
-```
+A benchmark is one Python class implementing the `BenchmarkAdapter` protocol
+([harness2/core/spec.py](harness2/core/spec.py)) — five questions to answer:
 
-See the [setup guide](docs/SETUP.md) for model settings, authentication
-alternatives, and the [Codex executor](docs/SETUP.md#codex-executor).
-
-## Run a benchmark
-
-The following example installs LAB and runs one task, then evaluates and reports
-its result. Model-backed runs incur API costs; start with a small task selection.
-
-```bash
-harness2-setup lab
-harness2-check --bench lab
-harness2 --bench lab --k 1 --mode parallel \
-  --only-domains antitrust-competition --max-tasks 1
-harness2-judge --bench lab --k 1 --mode parallel
-harness2-report --bench lab --k 1 --mode parallel
-```
-
-Sequential recursion runs the same commands with `--mode sequential`. `--k` is
-the task-level recursion budget; see [Experiments](#experiments). Judging and
-reporting must use the same benchmark, executor, subset, `--k`, `--mode`, and
-seed as the refinement run. Add `--dry-run` to `harness2` to preview task
-selection without model calls.
-
-| Benchmark | Tasks | Install | Guide |
-|---|---|---|---|
-| JobBench | Professional work | `harness2-setup jb` | [JobBench](docs/BENCHMARKS.md#jobbench) |
-| LAB | Legal work | `harness2-setup lab` | [LAB](docs/BENCHMARKS.md#lab) |
-| WorkBuddy-Bench | Office, web, and code | `harness2-setup wb` | [WorkBuddy](docs/BENCHMARKS.md#workbuddy-bench) |
-
-Choose one benchmark per command. WorkBuddy also takes `--subset office`,
-`--subset web`, or `--subset code` on every command after setup. The
-[benchmark guides](docs/BENCHMARKS.md) cover each one's data, domains, and
-grading.
-
-## Experiments
-
-Scale task-level recursion in two ways: **parallel recursion** explores multiple
-candidate harnesses and composes refinements from their execution evidence;
-**sequential recursion** carries the refined harness and accumulated evidence
-through successive Propose–Probe–Compose steps.
-
-<p align="center">
-  <a href="assets/harness2_recursion_modes.png">
-    <img src="assets/harness2_recursion_modes.png" alt="Two ways to scale task-level recursion. Parallel: probe k general and k domain-specific candidate harnesses, then produce k compositions from the shared evidence. Sequential: carry the refined harness and accumulated evidence through k Propose–Probe–Compose steps." width="100%">
-  </a>
-</p>
-<p align="center"><em>Parallel recursion explores wider; sequential recursion refines deeper.</em></p>
-
-| Option | Behavior |
+| Question | Methods |
 |---|---|
-| `--k 1` | One Propose–Probe–Compose step |
-| `--k K --mode parallel` | Probe `K` general and `K` domain-specific candidates, then produce `K` compositions |
-| `--k K --mode sequential` | Refine the harness through `K` successive steps |
-| `--substrate cx` | Use Codex instead of the default OpenCode executor |
+| Where tasks come from, how they group | `tasks()` / `domain_of()` / `task_prompt()` (criteria stripped) / `task_files()` |
+| How to run one rollout | `execute()` (delegates to the substrate) + a `BenchSpec` (install mode, leak globs) |
+| What counts as delivered | `delivered()` / `deliverable_text()` / `trajectory()` (shared `[ACTION]/[OBSERVATION]` grammar) |
+| What the baseline is | `base_harness()` + `validate_tree()` |
+| How to score | `score()` (called only after selection; a judge failure returns `None`, never 0) |
 
-After each task, harnessing-level recursion retains the adopted harness and
-evidence-supported lessons to guide future refinement. See the
-[experiment guide](docs/EXPERIMENTS.md) for task selection, concurrency,
-reproducibility, and baseline comparisons.
+Then register it in `make_adapter` in [harness2/cli/_common.py](harness2/cli/_common.py).
+Reference implementations: [jobbench.py](harness2/benchmarks/jobbench.py),
+[lab.py](harness2/benchmarks/lab.py).
 
-## Web access
+## Add your own agent framework
 
-Executor network access is unrestricted, and Codex runs with its sandbox
-disabled. Public benchmark rubrics may be accessible online. Before evaluation,
-configure [network restrictions](docs/EXPERIMENTS.md#web-access) to prevent
-access to benchmark answers and grading criteria.
+A substrate implements five methods (`surface / materialise / execute /
+read_trajectory / preflight`, see [harness2/substrate/base.py](harness2/substrate/base.py))
+and registers one line in [harness2/substrate/registry.py](harness2/substrate/registry.py) —
+CLI choices, adapter construction and help text all derive from it. See the
+fork-added [dsh.py](harness2/substrate/dsh.py) for a complete example.
 
-## Results and resume
+## Docs
 
-Results are saved under `runs/`, organized by benchmark and subset where
-applicable. They include task summaries, deliverables, adopted harnesses,
-reflection notes, and evaluation results.
+| Doc | Contents |
+|---|---|
+| [docs/WALKTHROUGH.zh.md](docs/WALKTHROUGH.zh.md) | **Full data-flow and judging walkthrough (Chinese, with diagrams)** |
+| [docs/SETUP.md](docs/SETUP.md) | Install, models and credentials |
+| [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Per-benchmark data, domains and grading |
+| [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | Recursion budgets, task selection, reproducibility, leak control |
 
-Repeat the same command to resume. Use a new `HARNESS2_RUNS_DIR` when changing
-models or task selection. See [results and resume](docs/EXPERIMENTS.md#results-and-resume)
-for details; each command also supports `--help`.
+## Acknowledgements and license
 
-## Citation
+This project is a derivative of Google Research's
+[Harness²](https://github.com/google-research/harness2) (Apache-2.0). The upstream
+method and paper:
 
 ```bibtex
 @article{xu2026harness2,
   title   = {Harness$^2$: Recursive Agent Harnessing for an Open World},
   author  = {Xu, Ruiyao and Chen, Yanfei and CuiZhu, Zhongying and Dalvi Mishra, Bhavana and Ming, Yifei and Yu, Han and Han, Rujun and Lee, Chen-Yu and Pfister, Tomas},
   journal = {arXiv preprint arXiv:2610.14224},
-  year    = {2026},
-  url     = {https://arxiv.org/abs/2610.14224}
+  year    = {2026}
 }
 ```
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-
-Harness² is licensed under [Apache 2.0](LICENSE). Third-party code under
-[`third_party/`](third_party/README.md), benchmarks, and datasets retain their
-upstream licenses; see
-[third-party notices](dependencies/README.md).
-
-## Disclaimer
-
-This is not an officially supported Google product. This project is not eligible
-for the [Google Open Source Software Vulnerability Rewards Program](https://bughunters.google.com/open-source-security).
+Code in this repository is released under [Apache-2.0](LICENSE); third-party code
+under `third_party/`, benchmarks, and datasets retain their upstream licenses (see
+[dependencies/README.md](dependencies/README.md)).
